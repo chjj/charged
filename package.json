@@ -1,0 +1,15 @@
+{
+  "name": "charged",
+  "description": "Binding to the Chargify API",
+  "author": "Christopher Jeffrey",
+  "version": "0.0.1",
+  "main": "./index.js",
+  "repository": "git://github.com/chjj/charged.git",
+  "homepage": "https://github.com/chjj/charged",
+  "bugs": { "url": "https://github.com/chjj/charged/issues" },
+  "keywords": [ "chargify", "charge" ],
+  "tags": [ "chargify", "charge" ],
+  "dependencies": {
+    "request": ">= 2.9.0"
+  }
+}
