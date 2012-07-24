@@ -5,10 +5,22 @@
 var Charged = require('../');
 
 /**
+ * Mock
+ */
+
+function Mock() {
+  Charged.apply(this, arguments);
+}
+
+Mock.prototype.__proto__ = Charged.prototype;
+
+/**
  * Mock Data
  */
 
-var _customer = {
+var data = Mock.data = {};
+
+data.customer = {
   id: 1,
   reference: 'foo',
   first_name: 'Foo',
@@ -26,19 +38,19 @@ var _customer = {
   card_type: 'foo'
 };
 
-var _subscription = {
+data.subscription = {
   id: 1,
   reference: 'foo',
-  customer: _customer,
-  credit_card: _customer
+  customer: data.customer,
+  credit_card: data.customer
 };
 
-var _product = {
+data.product = {
   id: 1,
   name: 'nodejitsu'
 };
 
-var _component = {
+data.component = {
   name: 'foo'
 };
 
@@ -46,21 +58,15 @@ var _component = {
  * Request
  */
 
-Charged.prototype.request = function(options, callback) {
+Mock.prototype.request = function(options, callback) {
   var result;
 
   switch (options.format) {
     case 'customer':
-      result = _customer;
-      break;
     case 'subscription':
-      result = _subscription;
-      break;
     case 'product':
-      result = _product;
-      break;
     case 'component':
-      result = _component;
+      result = clone(Mock.data[options.format]);
       break;
     default:
       result = {};
@@ -78,7 +84,28 @@ Charged.prototype.request = function(options, callback) {
 };
 
 /**
+ * Bind
+ */
+
+Mock.__defineGetter__('bind', function() {
+  Charged.prototype.request = Mock.prototype.request;
+  return Charged;
+});
+
+/**
+ * Helpers
+ */
+
+function clone(obj) {
+  var out = {};
+  Object.keys(obj || {}).forEach(function(key) {
+    out[key] = obj[key];
+  });
+  return out;
+}
+
+/**
  * Expose
  */
 
-module.exports = Charged;
+module.exports = Mock;

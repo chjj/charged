@@ -12,14 +12,8 @@ var charge = charged({
   key: 'ad3rt4302ebdd'
 });
 
-charge.readSubscription('chjj', function(err, result) {
+charge.getCustomerByRef('chjj', function(err, customer) {
   if (err) throw err;
-  console.log(result);
-});
-
-var options = { memo: 'bill', amount_in_cents: 100 };
-charge.charge('chjj', options, function(err, result) {
-  if (err) throw err;
-  console.log(result);
+  console.log(customer);
 });
 ```
