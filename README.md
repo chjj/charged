@@ -12,8 +12,8 @@ var chargify = charged({
   apiKey: 'ad3rt4302ebdd'
 });
 
-chargify.getCustomerByRef('chjj', function(err, customer) {
+chargify.getSubscriptionsByCustomerRef('chjj', function(err, results) {
   if (err) throw err;
-  console.log(customer);
+  console.log(results);
 });
 ```
