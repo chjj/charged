@@ -4,11 +4,14 @@
   "author": "Christopher Jeffrey",
   "version": "0.0.8",
   "main": "./index.js",
+  "bin": "./bin/charged",
+  "man": "./man/charged.1",
+  "preferGlobal": true,
   "repository": "git://github.com/chjj/charged.git",
   "homepage": "https://github.com/chjj/charged",
   "bugs": { "url": "https://github.com/chjj/charged/issues" },
-  "keywords": [ "chargify", "charge" ],
-  "tags": [ "chargify", "charge" ],
+  "keywords": ["chargify", "charge"],
+  "tags": ["chargify", "charge"],
   "dependencies": {
     "request": ">= 2.9.0"
   }

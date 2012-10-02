@@ -1,0 +1,40 @@
+.ds q \N'34'
+.TH charged 1
+.SH NAME
+charged \- a chargify shell and library
+.SH SYNOPSIS
+.nf
+.B charged [\-s subdomain] [\-k api-key] [\-\-site-key key] [\-\-family family]
+.fi
+.SH DESCRIPTION
+.B charged
+is a high-level binding to the Chargify API, as well as an interactive shell.
+.SH OPTIONS
+.TP
+.BI \-s,\ \-\-subdomain,\ \-\-site\ [subdomain]
+Specify the chargify site by subdomain. (Required).
+.TP
+.BI \-k,\ \-\-key,\ \-\-api\-key\ [key]
+The Chargify API key which corresponds to the specified site. (Required).
+.TP
+.BI \-\-site\-key\ [key]
+The Chargify shared site key for the specified site.
+.TP
+.BI \-\-family\ [family]
+The default product family ID for the specified site.
+.TP
+.BI \-h,\ \-\-help
+Display help information.
+.SH EXAMPLES
+.TP
+$ charged my-site
+.TP
+API Key: foobar
+.TP
+[charged] ls /stats
+.TP
+[charged] get-subscription 1000
+.SH BUGS
+Please report any bugs to https://github.com/chjj/charged.
+.SH LICENSE
+Copyright (c) 2012, Christopher Jeffrey (MIT License)

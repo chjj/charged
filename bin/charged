@@ -1,0 +1,507 @@
+#!/usr/bin/env node
+
+/**
+ * Charged Shell (https://github.com/chjj/charged)
+ * Copyright (c) 2012, Christopher Jeffrey (MIT License)
+ * Usage: $ charged my-site
+ */
+
+/**
+ * Modules
+ */
+
+var util = require('util')
+  , readline = require('readline')
+  , charged = require('../')
+  , resolve = require('path').resolve;
+
+var spawn = require('child_process').spawn
+  , fs = require('fs');
+
+/**
+ * Shell
+ */
+
+var shell = charged.shell = exports;
+
+/**
+ * Builtins
+ */
+
+shell.cwd = '/';
+
+shell.toplevel = [
+  '.',
+  'coupons/',
+  'customers/',
+  'events/',
+  'products/',
+  'product_families/',
+  'stats/',
+  'statements/',
+  'subscriptions/',
+  'transactions/',
+  'webhooks/'
+];
+
+shell.builtin = {
+  'cd': function(path, callback) {
+    shell.cwd = resolve('/', shell.cwd, path);
+    return callback();
+  },
+  'pwd': function(callback) {
+    return callback(null, shell.cwd);
+  },
+  'ls': function(path, callback) {
+    if (!callback) {
+      callback = path;
+      path = null;
+    }
+
+    path = path || '';
+    path = resolve('/', shell.cwd, path);
+    path = path.replace(/^\.?\/+|\/+$/g, '');
+
+    if (!path && shell.cwd === '/') {
+      return callback(null, shell.toplevel.join('\n'));
+    }
+
+    var parts = path.split('/');
+    if (parts[0] === 'customers' && parts[1] && !/^\d+$/.test(parts[1])) {
+      var ref = parts.splice(1, 1)[0];
+      if (parts[1] === 'subscriptions') {
+        return this.getSubscriptionsByCustomerRef(ref, callback);
+      }
+      parts.push('lookup?reference=' + ref);
+      path = parts.join('/');
+    }
+
+    return this.get('/' + path, callback);
+  },
+  'less': function(path, callback) {
+    return shell.proc(path, 'less', ['-R'], callback);
+  },
+  'cat': function() {
+    return this.ls.apply(this, arguments);
+  },
+  'rm': function(path, callback) {
+    if (!callback) {
+      callback = path;
+      path = null;
+    }
+
+    if (!path) {
+      return callback(new Error('Argument required.'));
+    }
+
+    path = resolve('/', shell.cwd, path);
+    path = path.replace(/^\.?\/+|\/+$/g, '');
+
+    var parts = path.split('/');
+    if (parts[0] === 'customers' && parts[1] && !/^\d+$/.test(parts[1])) {
+      var ref = parts.splice(1, 1)[0];
+      parts.push('lookup?reference=' + ref);
+      path = parts.join('/');
+    }
+
+    return this.delete('/' + path, callback);
+  },
+  'mv': function(options, path, callback) {
+    if (!callback) {
+      callback = path;
+      path = null;
+    }
+
+    if (!path) {
+      return callback(new Error('Argument required.'));
+    }
+
+    path = resolve('/', shell.cwd, path);
+    path = path.replace(/^\.?\/+|\/+$/g, '');
+
+    var parts = path.split('/');
+    if (parts[0] === 'customers' && parts[1] && !/^\d+$/.test(parts[1])) {
+      var ref = parts.splice(1, 1)[0];
+      parts.push('lookup?reference=' + ref);
+      path = parts.join('/');
+    }
+
+    if (!options || !path || !callback) {
+      return callback(new Error('Argument required.'));
+    }
+
+    return this.put('/' + path, options, callback);
+  },
+  'mk': function(path, options, callback) {
+    if (!callback) {
+      callback = options;
+      options = path;
+      path = null;
+    }
+
+    path = path || 'subscriptions';
+    path = resolve('/', shell.cwd, path);
+    path = path.replace(/^\.?\/+|\/+$/g, '');
+
+    if (!options || !path || !callback) {
+      return callback(new Error('Argument required.'));
+    }
+
+    return this.post('/' + path, options, callback);
+  },
+  'set': function (key, value, callback) {
+    if (!key || !value || !callback) {
+      return callback(new Error('Argument required.'));
+    }
+    shell.chargify[toCamel(key)] = value;
+    return callback();
+  },
+  'help': function (callback) {
+    shell.help();
+    return callback(null, shell.commands.join(' '));
+  }
+};
+
+shell.proc = function(path, name, args, callback) {
+  return shell.chargify.ls(path, function(err, results) {
+    if (err) results = err.message;
+
+    results = inspect(results);
+
+    var tmp = process.env.HOME + '/.charged-tmp~' + Date.now();
+    fs.writeFile(tmp, results, function(err) {
+      if (err) return callback(err);
+
+      var ps = spawn(name, args.concat(tmp), {
+        cwd: process.cwd(),
+        env: process.env,
+        setsid: false,
+        customFds: [0, 1, 2]
+      });
+
+      ps.on('exit', function() {
+        fs.unlink(tmp, function() {
+          return callback();
+        });
+      });
+    });
+  });
+};
+
+Object.keys(shell.builtin).forEach(function(name) {
+  if (typeof shell.builtin[name] === 'function') {
+    charged.prototype[name] = shell.builtin[name];
+  } else {
+    charged.prototype[name] = charged.prototype[shell.builtin[name]];
+  }
+});
+
+/**
+ * Commands
+ */
+
+shell.commands = Object.keys(charged.prototype).filter(function(name) {
+  return typeof charged.prototype[name] === 'function';
+}).map(toDash);
+
+/**
+ * Execute Command
+ */
+
+shell.exec = function(args, callback) {
+  var cmd = args.shift();
+
+  if (!cmd) {
+    return callback();
+  }
+
+  if (!~shell.commands.indexOf(cmd)) {
+    console.error('No such command: "' + cmd + '".');
+    return callback();
+  }
+
+  cmd = toCamel(cmd);
+
+  args.forEach(function(arg, i) {
+    if (!arg) return;
+
+    try {
+      if (arg[0] === '{' || arg[0] === '[') {
+        arg = 'return (' + arg + ');';
+        arg = new Function('', arg).call(null);
+      }
+    } catch (e) {
+      ;
+    }
+
+    args[i] = arg;
+  });
+
+  if (process.env.CHARGED_DEBUG) {
+    console.log(cmd, args);
+    return callback();
+  }
+
+  args.push(function(err, results) {
+    if (err) {
+      console.error(err.message);
+      return callback();
+    }
+    if (results) print(results);
+    return callback();
+  });
+
+  return shell.chargify[cmd].apply(shell.chargify, args);
+};
+
+/**
+ * Completions
+ */
+
+shell.complete = function(line, callback) {
+  var parts = line.replace(/^\s+/, '').split(/\s+/)
+    , out = [];
+
+  if (parts.length === 1) {
+    var i = shell.commands.length
+      , cmd = parts[0];
+
+    while (i--) {
+      if (shell.commands[i].indexOf(cmd) === 0) {
+        out.push(shell.commands[i]);
+      }
+    }
+
+    if (out.length === 1 && cmd === out[0]) {
+      // out[0] += ' ';
+    }
+  } else if (parts.length === 2) {
+    if (shell.builtin[parts[0]]) {
+      var i = shell.toplevel.length
+        , start = /^(\.?\/+|)/.exec(parts[1])[1]
+        , path = parts[1].substring(start.length);
+
+      if (shell.cwd !== '/' && start !== '/') return done();
+
+      while (i--) {
+        if (shell.toplevel[i].indexOf(path) === 0) {
+          out.push(parts[0] + ' ' + start + shell.toplevel[i]);
+        }
+      }
+
+      if (out.length === 1 && path === out[0]) {
+        // out[0] += ' ';
+      }
+    }
+  }
+
+  function done() {
+    return callback(null, [out, line]);
+  }
+
+  return done();
+};
+
+/**
+ * Help
+ */
+
+shell.help = function() {
+  console.error('Charged Shell');
+  console.error('Copyright (c) 2012, Christopher Jeffrey (MIT License)');
+  console.error('Usage: $ charged [subdomain] [api-key]\n'
+              + '                 [--subdomain subdomain] [--key key]\n'
+              + '                 [--site-key key] [--family family]');
+};
+
+/**
+ * Main
+ */
+
+shell.start = function() {
+  var options = parseArg();
+
+  shell.rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout,
+    completer: shell.complete
+  });
+
+  function askSubdomain(callback) {
+    if (options.subdomain) return callback();
+    shell.rl.question('Subdomain: ', function(result) {
+      options.subdomain = result.trim();
+      if (!options.subdomain) return askSubdomain(callback);
+      return callback();
+    });
+  }
+
+  function askApiKey(callback) {
+    if (options.apiKey) return callback();
+    shell.rl.question('API Key: ', function(result) {
+      options.apiKey = result.trim();
+      if (!options.apiKey) return askApiKey(callback);
+      return callback();
+    });
+  }
+
+  function askSiteKey(callback) {
+    if (options.siteKey) return callback();
+    shell.rl.question('Shared Site Key (optional): ', function(result) {
+      options.siteKey = result.trim();
+      return callback();
+    });
+  }
+
+  function askFamily(callback) {
+    if (options.defaultFamily) return callback();
+    shell.rl.question('Default Family (optional): ', function(result) {
+      options.defaultFamily = result.trim();
+      return callback();
+    });
+  }
+
+  function prompt() {
+    var wait;
+
+    if (!options.subdomain || !options.apiKey) {
+      return help();
+    }
+
+    shell.chargify = charged(options);
+
+    shell.rl.on('line', function(line) {
+      if (wait) return;
+
+      var args = line.trim().split(/\s+/);
+
+      wait = true;
+      shell.exec(args, function() {
+        wait = false;
+        shell.rl.prompt(true);
+      });
+    });
+
+    shell.rl.on('close', function() {
+      return process.exit(0);
+    });
+
+    shell.rl.setPrompt('\x1b[1;32;40m[charged]\x1b[m ', 10);
+
+    shell.rl.prompt(true);
+  }
+
+  return askSubdomain(function() {
+    return askApiKey(function() {
+      return prompt();
+    });
+  });
+};
+
+/**
+ * Helpers
+ */
+
+function toCamel(str) {
+  return str.replace(/-(\w)/g, function(_, ch) {
+    return ch.toUpperCase();
+  });
+}
+
+function toDash(str) {
+  return str.replace(/([a-z])([A-Z])/g, function(_, a, b) {
+    return a + '-' + b.toLowerCase();
+  });
+}
+
+function inspect(obj) {
+  if (typeof obj !== 'string') {
+    obj = util.inspect(obj, false, 4, true);
+  }
+  return obj;
+}
+
+function print(obj) {
+  return process.stdout.write(inspect(obj) + '\n');
+}
+
+/**
+ * Parse Arguments
+ */
+
+function parseArg() {
+  var argv = process.argv.slice(2)
+    , opt = {}
+    , arg;
+
+  function getarg() {
+    var arg = argv.shift();
+
+    if (arg.indexOf('--') === 0) {
+      // e.g. --opt
+      arg = arg.split('=');
+      if (arg.length > 1) {
+        // e.g. --opt=val
+        argv.unshift(arg.slice(1).join('='));
+      }
+      arg = arg[0];
+    } else if (arg[0] === '-') {
+      if (arg.length > 2) {
+        // e.g. -abc
+        argv = arg.substring(1).split('').map(function(ch) {
+          return '-' + ch;
+        }).concat(argv);
+        arg = argv.shift();
+      } else {
+        // e.g. -a
+      }
+    } else {
+      // e.g. foo
+    }
+
+    return arg;
+  }
+
+  while (argv.length) {
+    arg = getarg();
+    switch (arg) {
+      case '--family':
+        opt.defaultFamily = argv.shift();
+        break;
+      case '--site-key':
+        opt.siteKey = argv.shift();
+        break;
+      case '-k':
+      case '--key':
+      case '--api-key':
+        opt.apiKey = argv.shift();
+        break;
+      case '-s':
+      case '--subdomain':
+      case '--site':
+        opt.subdomain = argv.shift();
+        break;
+      case '-h':
+      case '--help':
+        help();
+        return process.exit(0);
+      default:
+        if (!opt.subdomain) {
+          opt.subdomain = arg;
+        } else if (!opt.apiKey) {
+          opt.apiKey = arg;
+        }
+        break;
+    }
+  }
+
+  return opt;
+}
+
+/**
+ * Start
+ */
+
+if (!module.parent) {
+  shell.start();
+}
