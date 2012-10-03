@@ -38,6 +38,7 @@ shell.cwd = '/';
 shell.toplevel = [
   './',
   'coupons/',
+  'components/',
   'customers/',
   'events/',
   'products/',
@@ -49,6 +50,31 @@ shell.toplevel = [
   'webhooks/'
 ];
 
+shell.reduced = [
+  'id',
+  'reference',
+  'handle',
+  'name'
+];
+
+shell.resources = [
+  'customer',
+  'subscription',
+  'statement',
+  'statement_ids',
+  'migration',
+  'adjustment',
+  'component',
+  'usage',
+  'credit',
+  'refund',
+  'coupon',
+  'transaction',
+  'product',
+  'product_family',
+  'webhook'
+];
+
 shell.builtin = {
   'cd': function(path, callback) {
     shell.cwd = resolve('/', shell.cwd, path);
@@ -57,7 +83,67 @@ shell.builtin = {
   'pwd': function(callback) {
     return callback(null, shell.cwd);
   },
+  'list': function(path, callback) {
+    if (!callback) {
+      callback = path;
+      path = null;
+    }
+
+    path = resolve('/', shell.cwd, path);
+
+    shell._collectGarbage();
+
+    if (shell.cache[path]) {
+      return callback(null, shell.cache[path]);
+    }
+
+    return this.cat(path, function(err, results) {
+      if (err) return callback(err);
+
+      if (!Array.isArray(results)) {
+        return callback(null, results);
+      }
+
+      var out = []
+        , keys
+        , type;
+
+      if (results.length) {
+        keys = Object.keys(results[0]);
+        if (keys.length === 1) {
+          type = keys[0];
+        }
+      }
+
+      if (type) {
+        results = results.map(function(obj) {
+          return obj[type];
+        }).filter(Boolean);
+      }
+
+      shell.reduced.forEach(function(prop) {
+        results.forEach(function(obj) {
+          if (obj[prop] && !~out.indexOf(obj[prop])) {
+            out.push(obj[prop]);
+          }
+        });
+      });
+
+      out = out.join('\n');
+
+      shell._collectGarbage();
+      shell.cache[path] = out;
+
+      return callback(null, out);
+    });
+  },
   'ls': function(path, callback) {
+    return this.list.apply(this, arguments);
+  },
+  'll': function(path, callback) {
+    return this.cat.apply(this, arguments);
+  },
+  'cat': function(path, callback) {
     if (!callback) {
       callback = path;
       path = null;
@@ -72,29 +158,50 @@ shell.builtin = {
     }
 
     var parts = path.split('/');
-    if (parts[0] === 'customers' && parts[1] && !/^\d+$/.test(parts[1])) {
-      var ref = parts.splice(1, 1)[0];
-      if (parts[1] === 'subscriptions') {
-        return this.getSubscriptionsByCustomerRef(ref, callback);
+    if (parts[0] === 'customers') {
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        var ref = parts.splice(1, 1)[0];
+        if (parts[1] === 'subscriptions') {
+          return this.getSubscriptionsByCustomerRef(ref, callback);
+        }
+        parts.push('lookup?reference=' + ref);
+        path = parts.join('/');
       }
-      parts.push('lookup?reference=' + ref);
-      path = parts.join('/');
+    } else if (parts[0] === 'products') {
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        parts.splice(1, 0, 'handle');
+        path = parts.join('/');
+      }
+    } else if (parts[0] === 'components') {
+      if (!parts[1]) {
+        return this.getComponents(callback);
+      } else {
+        return this.getComponent(parts[1], callback);
+      }
+    } else if (parts[0] === 'product_families') {
+      if (parts[2] === 'products') {
+        if (!/^\d+$/.test(parts[1])) {
+          return this.getFamilyProductsByHandle(parts[1], callback);
+        } else {
+          return this.getFamilyProducts(parts[1], callback);
+        }
+      } else if (parts[1]) {
+        if (!/^\d+$/.test(parts[1])) {
+          return this.getProductFamilyByHandle(parts[1], callback);
+        } else {
+          return this.getProductFamily(parts[1], callback);
+        }
+      }
     }
 
     return this.get('/' + path, callback);
-  },
-  'll': function(path, callback) {
-    return this.ls.apply(this, arguments);
-  },
-  'cat': function() {
-    return this.ls.apply(this, arguments);
   },
   'less': function(path, callback) {
     if (!callback) {
       callback = path;
       path = null;
     }
-    return shell.proc(path, 'less', ['-R'], callback);
+    return shell.spawn(path, 'less', ['-R'], callback);
   },
   'rm': function(path, callback) {
     if (!callback) {
@@ -110,10 +217,17 @@ shell.builtin = {
     path = path.replace(/^\.?\/+|\/+$/g, '');
 
     var parts = path.split('/');
-    if (parts[0] === 'customers' && parts[1] && !/^\d+$/.test(parts[1])) {
-      var ref = parts.splice(1, 1)[0];
-      parts.push('lookup?reference=' + ref);
-      path = parts.join('/');
+    if (parts[0] === 'customers') {
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        var ref = parts.splice(1, 1)[0];
+        parts.push('lookup?reference=' + ref);
+        path = parts.join('/');
+      }
+    } else if (parts[0] === 'products') {
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        parts.splice(1, 0, 'handle');
+        path = parts.join('/');
+      }
     }
 
     return this.delete('/' + path, callback);
@@ -132,10 +246,17 @@ shell.builtin = {
     path = path.replace(/^\.?\/+|\/+$/g, '');
 
     var parts = path.split('/');
-    if (parts[0] === 'customers' && parts[1] && !/^\d+$/.test(parts[1])) {
-      var ref = parts.splice(1, 1)[0];
-      parts.push('lookup?reference=' + ref);
-      path = parts.join('/');
+    if (parts[0] === 'customers') {
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        var ref = parts.splice(1, 1)[0];
+        parts.push('lookup?reference=' + ref);
+        path = parts.join('/');
+      }
+    } else if (parts[0] === 'products') {
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        parts.splice(1, 0, 'handle');
+        path = parts.join('/');
+      }
     }
 
     if (!options || !path || !callback) {
@@ -161,20 +282,30 @@ shell.builtin = {
 
     return this.post('/' + path, options, callback);
   },
-  'set': function (key, value, callback) {
+  'setopt': function(key, value, callback) {
     if (!key || !value || !callback) {
       return callback(new Error('Argument required.'));
     }
     shell.chargify[toCamel(key)] = value;
     return callback();
   },
-  'help': function (cmd, callback) {
+  'getopt': function(key, callback) {
+    return callback(null, shell.chargify[toCamel(key)]);
+  },
+  'help': function(cmd, callback) {
     if (!callback) {
       callback = cmd;
       cmd = null;
     }
 
     if (cmd) {
+      if (cmd === 'all') {
+        Object.keys(shell.info).forEach(function(cmd) {
+          shell.builtin.help(cmd, function() {});
+          console.error('');
+        });
+        return callback();
+      }
       if (!shell.info[cmd]) {
         console.error('No information for command: `' + cmd + '`.');
         return callback();
@@ -206,6 +337,18 @@ shell.builtin = {
     console.error(out.join(''));
 
     return callback();
+  },
+  'clear': function(callback) {
+    var ps = spawn('/bin/sh',
+      ['-c', 'tput clear && tput cud $(tput lines)'],
+      { customFds: [0, 1, 2] });
+
+    ps.on('exit', function() {
+      return callback();
+    });
+  },
+  'exit': function(callback) {
+    return process.exit(0);
   }
 };
 
@@ -217,8 +360,8 @@ Object.keys(shell.builtin).forEach(function(name) {
  * Execute Process
  */
 
-shell.proc = function(path, name, args, callback) {
-  return shell.chargify.ls(path, function(err, results) {
+shell.spawn = function(path, name, args, callback) {
+  return shell.chargify.cat(path, function(err, results) {
     if (err) results = err.message;
 
     results = inspect(results);
@@ -247,7 +390,32 @@ shell.proc = function(path, name, args, callback) {
  * Commands
  */
 
-shell.info = {};
+shell.info = {
+  'help':   ['Syntax: help [command].',
+             'Lookup info about a command.'].join('\n'),
+  'cd':     ['Syntax: cd [target].',
+             'Change working directory.'].join('\n'),
+  'pwd':    ['Syntax: pwd.',
+             'Print working directory.'].join('\n'),
+  'ls':     ['Syntax: ls [target].',
+             'List contents of resource.'].join('\n'),
+  'cat':    ['Syntax: cat [target].',
+             'Show contents of resource.'].join('\n'),
+  'rm':     ['Syntax: rm [target].',
+             'Remove resource.'].join('\n'),
+  'mv':     ['Syntax: mv [data] [target].',
+             'Update target with data.'].join('\n'),
+  'mk':     ['Syntax: mk [target] [data].',
+             'Create target with data.'].join('\n'),
+  'clear':  ['Syntax: clear.',
+             'Clear terminal screen.'].join('\n'),
+  'getopt': ['Syntax: getopt [key].',
+             'Show option.'].join('\n'),
+  'setopt': ['Syntax: setopt [key] [value].',
+             'Set option to value.'].join('\n'),
+  'exit':   ['Syntax: exit.',
+             'Exit.'].join('\n')
+};
 
 shell.ignore = [
   'request',
@@ -263,7 +431,8 @@ shell.returned = [
 ];
 
 shell.commands = Object.keys(charged.prototype).filter(function(name) {
-  return typeof charged.prototype[name] === 'function'
+  return name[0] !== '_'
+      && typeof charged.prototype[name] === 'function'
       && !~shell.ignore.indexOf(name);
 }).map(toDash);
 
@@ -331,39 +500,85 @@ shell.exec = function(args, callback) {
  * Completions
  */
 
+shell.cache = {};
+
+shell._collectGarbage = function() {
+  if (shell._timeout) {
+    clearTimeout(shell._timeout);
+  }
+  shell._timeout = setTimeout(function() {
+    shell.cache = {};
+  }, 20 * 1000);
+};
+
+shell.list = function(path, callback) {
+  if (!callback) {
+    callback = path;
+    path = null;
+  }
+
+  return shell.chargify.list(path, function(err, results) {
+    if (err) return callback(err);
+
+    if (typeof results !== 'string') {
+      results = '';
+    }
+
+    results = results.trim().split(/\n+/);
+
+    return callback(null, results);
+  });
+};
+
 shell.complete = function(line, callback) {
   var parts = line.replace(/^\s+/, '').split(/\s+/)
+    , cmd = parts[0]
     , out = [];
 
   if (parts.length === 1) {
-    var i = shell.commands.length
-      , cmd = parts[0];
+    var i = shell.commands.length;
 
     while (i--) {
       if (shell.commands[i].indexOf(cmd) === 0) {
-        out.push(shell.commands[i]);
+        if (cmd !== shell.commands[i]) {
+          out.push(shell.commands[i]);
+        }
       }
     }
-
-    if (out.length === 1 && cmd === out[0]) {
-      // out[0] += ' ';
-    }
   } else if (parts.length === 2) {
-    if (shell.builtin[parts[0]]) {
+    if (shell.builtin[cmd]) {
       var i = shell.toplevel.length
         , start = /^(\.?\/+|)/.exec(parts[1])[1]
-        , path = parts[1].substring(start.length);
+        , path = parts[1].substring(start.length)
+        , last;
 
       if (shell.cwd !== '/' && start !== '/') return done();
 
       while (i--) {
         if (shell.toplevel[i].indexOf(path) === 0) {
-          out.push(parts[0] + ' ' + start + shell.toplevel[i]);
+          if (path !== shell.toplevel[i]) {
+            out.push(cmd + ' ' + start + shell.toplevel[i]);
+          }
         }
       }
 
-      if (out.length === 1 && path === out[0]) {
-        // out[0] += ' ';
+      if (!out.length) {
+        path = path.split('/');
+        last = path.pop();
+        path = start + path.join('/');
+
+        return shell.list(path, function(err, results) {
+          if (err) return done();
+
+          i = results.length;
+          while (i--) {
+            if (results[i].indexOf(last) === 0) {
+              out.push(cmd + ' ' + path + '/' + results[i]);
+            }
+          }
+
+          return done();
+        });
       }
     }
   }
@@ -647,7 +862,7 @@ function parseArg() {
       case '--conf':
       case '--config':
         cfg = require(resolve(argv.shift()));
-        opt = merge(opt, cfg.chargify || cfg);
+        merge(opt, cfg.chargify || cfg);
         break;
       case '--raw':
         opt.raw = true;
