@@ -1,9 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Charged Shell (https://github.com/chjj/charged)
+ * Charged (https://github.com/chjj/charged)
  * Copyright (c) 2012, Christopher Jeffrey (MIT License)
  * Usage: $ charged my-site
+ *        $ charged my-site my-key -c 'ls /stats'
+ *        $ charged my-site my-key ls /stats
+ *        $ echo 'ls /stats' | charged my-site my-key
+ *        $ echo 'ls /stats' | charged --config ~/charged.json
+ *        $ charged --cfg ./config.json ls /customers/foo/subscriptions
  */
 
 /**
@@ -12,11 +17,11 @@
 
 var util = require('util')
   , readline = require('readline')
-  , charged = require('../')
-  , resolve = require('path').resolve;
-
-var spawn = require('child_process').spawn
-  , fs = require('fs');
+  , resolve = require('path').resolve
+  , spawn = require('child_process').spawn
+  , fs = require('fs')
+  , isatty = require('tty').isatty
+  , charged = require('../');
 
 /**
  * Shell
@@ -31,7 +36,7 @@ var shell = charged.shell = exports;
 shell.cwd = '/';
 
 shell.toplevel = [
-  '.',
+  './',
   'coupons/',
   'customers/',
   'events/',
@@ -78,11 +83,18 @@ shell.builtin = {
 
     return this.get('/' + path, callback);
   },
-  'less': function(path, callback) {
-    return shell.proc(path, 'less', ['-R'], callback);
+  'll': function(path, callback) {
+    return this.ls.apply(this, arguments);
   },
   'cat': function() {
     return this.ls.apply(this, arguments);
+  },
+  'less': function(path, callback) {
+    if (!callback) {
+      callback = path;
+      path = null;
+    }
+    return shell.proc(path, 'less', ['-R'], callback);
   },
   'rm': function(path, callback) {
     if (!callback) {
@@ -156,11 +168,54 @@ shell.builtin = {
     shell.chargify[toCamel(key)] = value;
     return callback();
   },
-  'help': function (callback) {
+  'help': function (cmd, callback) {
+    if (!callback) {
+      callback = cmd;
+      cmd = null;
+    }
+
+    if (cmd) {
+      if (!shell.info[cmd]) {
+        console.error('No information for command: `' + cmd + '`.');
+        return callback();
+      }
+      console.error(cmd);
+      console.error(shell.info[cmd]);
+      return callback();
+    }
+
     shell.help();
-    return callback(null, shell.commands.join(' '));
+
+    console.error('');
+
+    var out = []
+      , i = 0;
+
+    shell.commands.forEach(function(cmd, j) {
+      if (i + cmd.length > 80) {
+        i = 0;
+        out.push('\n');
+      } else if (j) {
+        i++;
+        out.push(' ');
+      }
+      i += cmd.length;
+      out.push(cmd);
+    });
+
+    console.error(out.join(''));
+
+    return callback();
   }
 };
+
+Object.keys(shell.builtin).forEach(function(name) {
+  charged.prototype[name] = shell.builtin[name];
+});
+
+/**
+ * Execute Process
+ */
 
 shell.proc = function(path, name, args, callback) {
   return shell.chargify.ls(path, function(err, results) {
@@ -188,20 +243,28 @@ shell.proc = function(path, name, args, callback) {
   });
 };
 
-Object.keys(shell.builtin).forEach(function(name) {
-  if (typeof shell.builtin[name] === 'function') {
-    charged.prototype[name] = shell.builtin[name];
-  } else {
-    charged.prototype[name] = charged.prototype[shell.builtin[name]];
-  }
-});
-
 /**
  * Commands
  */
 
+shell.info = {};
+
+shell.ignore = [
+  'request',
+  'get',
+  'post',
+  'put',
+  'delete'
+];
+
+shell.returned = [
+  'hostedPage',
+  'signupPage'
+];
+
 shell.commands = Object.keys(charged.prototype).filter(function(name) {
-  return typeof charged.prototype[name] === 'function';
+  return typeof charged.prototype[name] === 'function'
+      && !~shell.ignore.indexOf(name);
 }).map(toDash);
 
 /**
@@ -209,14 +272,15 @@ shell.commands = Object.keys(charged.prototype).filter(function(name) {
  */
 
 shell.exec = function(args, callback) {
-  var cmd = args.shift();
+  var args = args.trim().split(/\s+/)
+    , cmd = args.shift();
 
   if (!cmd) {
     return callback();
   }
 
   if (!~shell.commands.indexOf(cmd)) {
-    console.error('No such command: "' + cmd + '".');
+    console.error('No such command: `' + cmd + '`. Type `help` for commands.');
     return callback();
   }
 
@@ -237,8 +301,17 @@ shell.exec = function(args, callback) {
     args[i] = arg;
   });
 
-  if (process.env.CHARGED_DEBUG) {
+  if (shell.options.debug) {
     console.log(cmd, args);
+    return callback();
+  }
+
+  if (~shell.returned.indexOf(cmd)) {
+    try {
+      print(shell.chargify[cmd].apply(shell.chargify, args));
+    } catch (e) {
+      console.error(e.message);
+    }
     return callback();
   }
 
@@ -307,100 +380,158 @@ shell.complete = function(line, callback) {
  */
 
 shell.help = function() {
-  console.error('Charged Shell');
+  console.error('Charged (https://github.com/chjj/charged)');
   console.error('Copyright (c) 2012, Christopher Jeffrey (MIT License)');
   console.error('Usage: $ charged [subdomain] [api-key]\n'
               + '                 [--subdomain subdomain] [--key key]\n'
-              + '                 [--site-key key] [--family family]');
+              + '                 [--site-key key] [--family family]\n'
+              + '                 [--config conf] [--debug] [--raw]\n'
+              + '                 [--command cmd] [--help]\n'
+              + '                 [--opt.foo val] [cmd]');
 };
 
 /**
- * Main
+ * Charged
  */
 
-shell.start = function() {
-  var options = parseArg();
+shell.__defineGetter__('chargify', function() {
+  if (shell._chargify) return shell._chargify;
 
+  if (!shell.options.subdomain || !shell.options.apiKey) {
+    if (isatty(1)) shell.help();
+    return process.exit(1);
+  }
+
+  shell._chargify = charged(shell.options);
+
+  return shell._chargify;
+});
+
+/**
+ * Read Command
+ */
+
+shell.readCommand = function() {
+  function exec(cmd) {
+    shell.exec(cmd, function() {
+      return process.exit(0);
+    });
+  }
+
+  if (shell.options.command) {
+    return exec(shell.options.command);
+  }
+
+  return getStdin(function(err, cmd) {
+    return err
+      ? process.exit(1)
+      : exec(cmd);
+  });
+};
+
+/**
+ * Interactive
+ */
+
+shell.interactive = function() {
   shell.rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     completer: shell.complete
   });
 
-  function askSubdomain(callback) {
-    if (options.subdomain) return callback();
-    shell.rl.question('Subdomain: ', function(result) {
-      options.subdomain = result.trim();
-      if (!options.subdomain) return askSubdomain(callback);
-      return callback();
-    });
-  }
-
-  function askApiKey(callback) {
-    if (options.apiKey) return callback();
-    shell.rl.question('API Key: ', function(result) {
-      options.apiKey = result.trim();
-      if (!options.apiKey) return askApiKey(callback);
-      return callback();
-    });
-  }
-
-  function askSiteKey(callback) {
-    if (options.siteKey) return callback();
-    shell.rl.question('Shared Site Key (optional): ', function(result) {
-      options.siteKey = result.trim();
-      return callback();
-    });
-  }
-
-  function askFamily(callback) {
-    if (options.defaultFamily) return callback();
-    shell.rl.question('Default Family (optional): ', function(result) {
-      options.defaultFamily = result.trim();
-      return callback();
-    });
-  }
-
-  function prompt() {
-    var wait;
-
-    if (!options.subdomain || !options.apiKey) {
-      return help();
-    }
-
-    shell.chargify = charged(options);
-
-    shell.rl.on('line', function(line) {
-      if (wait) return;
-
-      var args = line.trim().split(/\s+/);
-
-      wait = true;
-      shell.exec(args, function() {
-        wait = false;
-        shell.rl.prompt(true);
-      });
-    });
-
-    shell.rl.on('close', function() {
-      return process.exit(0);
-    });
-
-    shell.rl.setPrompt('\x1b[1;32;40m[charged]\x1b[m ', 10);
-
-    shell.rl.prompt(true);
-  }
-
-  return askSubdomain(function() {
-    return askApiKey(function() {
-      return prompt();
+  return shell.askSubdomain(function() {
+    return shell.askApiKey(function() {
+      return shell.prompt();
     });
   });
+};
+
+shell.askSubdomain = function(callback) {
+  if (shell.options.subdomain) return callback();
+  shell.rl.question('Subdomain: ', function(result) {
+    shell.options.subdomain = result.trim();
+    if (!shell.options.subdomain) {
+      return shell.askSubdomain(callback);
+    }
+    return callback();
+  });
+};
+
+shell.askApiKey = function(callback) {
+  if (shell.options.apiKey) return callback();
+  shell.rl.question('API Key: ', function(result) {
+    shell.options.apiKey = result.trim();
+    if (!shell.options.apiKey) {
+      return shell.askApiKey(callback);
+    }
+    return callback();
+  });
+};
+
+shell.askSiteKey = function(callback) {
+  if (shell.options.siteKey) return callback();
+  shell.rl.question('Shared Site Key (optional): ', function(result) {
+    shell.options.siteKey = result.trim();
+    return callback();
+  });
+};
+
+shell.askFamily = function(callback) {
+  if (shell.options.defaultFamily) return callback();
+  shell.rl.question('Default Family (optional): ', function(result) {
+    shell.options.defaultFamily = result.trim();
+    return callback();
+  });
+};
+
+shell.prompt = function() {
+  var wait;
+
+  shell.rl.on('line', function(line) {
+    if (wait) return;
+    wait = true;
+    shell.exec(line, function() {
+      wait = false;
+      shell.rl.prompt(true);
+    });
+  });
+
+  shell.rl.on('close', function() {
+    return process.exit(0);
+  });
+
+  shell.rl.setPrompt('\x1b[1;32;40m[charged]\x1b[m ', 10);
+
+  shell.rl.prompt(true);
+};
+
+/**
+ * Options
+ */
+
+shell.options = parseArg();
+
+/**
+ * Main
+ */
+
+shell.start = function() {
+  return !isatty(0) || shell.options.command || shell.options.raw
+    ? shell.readCommand()
+    : shell.interactive();
 };
 
 /**
  * Helpers
  */
+
+function merge(i, o) {
+  Object.keys(o).forEach(function(key) {
+    i[key] = o[key];
+  });
+  return i;
+}
 
 function toCamel(str) {
   return str.replace(/-(\w)/g, function(_, ch) {
@@ -422,7 +553,33 @@ function inspect(obj) {
 }
 
 function print(obj) {
+  if (!isatty(1)) {
+    return process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
+  }
   return process.stdout.write(inspect(obj) + '\n');
+}
+
+function getStdin(callback) {
+  var stdin = process.stdin
+    , buf = '';
+
+  stdin.setEncoding('utf8');
+
+  stdin.on('data', function(data) {
+    buf += data;
+  });
+
+  stdin.on('error', callback);
+
+  stdin.on('end', function() {
+    callback(null, buf);
+  });
+
+  try {
+    stdin.resume();
+  } catch (e) {
+    callback(e);
+  }
 }
 
 /**
@@ -431,6 +588,7 @@ function print(obj) {
 
 function parseArg() {
   var argv = process.argv.slice(2)
+    , cfg
     , opt = {}
     , arg;
 
@@ -481,15 +639,41 @@ function parseArg() {
       case '--site':
         opt.subdomain = argv.shift();
         break;
+      case '-c':
+      case '--command':
+        opt.command = argv.shift();
+        break;
+      case '--cfg':
+      case '--conf':
+      case '--config':
+        cfg = require(resolve(argv.shift()));
+        opt = merge(opt, cfg.chargify || cfg);
+        break;
+      case '--raw':
+        opt.raw = true;
+        break;
+      case '--debug':
+        opt.debug = true;
+        break;
       case '-h':
       case '--help':
-        help();
+        shell.help();
         return process.exit(0);
       default:
+        if (arg.indexOf('opt.') === 0) {
+          opt[toCamel(arg.substring(4))] = argv.shift();
+          break;
+        }
         if (!opt.subdomain) {
           opt.subdomain = arg;
         } else if (!opt.apiKey) {
           opt.apiKey = arg;
+        } else {
+          if (!opt.command) {
+            opt.command = arg;
+          } else {
+            opt.command += ' ' + arg;
+          }
         }
         break;
     }

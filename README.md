@@ -20,6 +20,18 @@ chargify.getSubscriptionsByCustomerRef('chjj', function(err, results) {
 });
 ```
 
+* * *
+
+``` bash
+Usage: $ charged my-site
+       $ charged my-site my-key 'ls /customers/foo'
+       $ echo 'ls /stats' | charged my-site my-key
+       $ echo 'ls /stats' | charged --cfg ./config.json
+       $ charged --cfg ./config.json ls /customers/foo/subscriptions
+```
+
+* * *
+
 ``` bash
 $ charged my-site
 API Key: foobar
