@@ -72,7 +72,8 @@ shell.resources = [
   'transaction',
   'product',
   'product_family',
-  'webhook'
+  'webhook',
+  'errors'
 ];
 
 shell.builtin = {
@@ -144,75 +145,20 @@ shell.builtin = {
     return this.cat.apply(this, arguments);
   },
   'cat': function(path, callback) {
-    var self = this
-      , parts;
-
     if (!callback) {
       callback = path;
       path = null;
     }
 
-    path = path || '';
-    path = resolve('/', shell.cwd, path);
-    path = path.replace(/^\.?\/+|\/+$/g, '');
+    if (!path) {
+      path = '';
+    }
 
-    if (!path && shell.cwd === '/') {
+    if (resolve('/', shell.cwd, path) === '/') {
       return callback(null, shell.toplevel.join('\n'));
     }
 
-    parts = path.split('/');
-
-    if (parts[0] === 'customers') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        var ref = parts.splice(1, 1)[0];
-        if (parts[1] === 'subscriptions') {
-          return this.getSubscriptionsByCustomerRef(ref, callback);
-        }
-        parts.push('lookup?reference=' + ref);
-        path = parts.join('/');
-        //return this.getCustomerByRef(parts[1], function (err, customer) {
-        //  if (err) return callback(err);
-        //  parts[1] = customer.id + '';
-        //  return request();
-        //});
-      }
-    } else if (parts[0] === 'products') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        parts.splice(1, 0, 'handle');
-        path = parts.join('/');
-        //return this.getProductByHandle(parts[1], function (err, product) {
-        //  if (err) return callback(err);
-        //  parts[1] = product.id + '';
-        //  return request();
-        //});
-      }
-    } else if (parts[0] === 'product_families') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        return this.getFamilyByHandle(parts[1], function (err, family) {
-          if (err) return callback(err);
-          parts[1] = family.id + '';
-          return request();
-        });
-      }
-    }
-
-    // Add a components directory.
-    if (parts[0] === 'components') {
-      if (parts[1]) {
-        return !/^\d+$/.test(parts[1])
-          ? this.getComponentByName(parts[1], callback)
-          : this.getComponent(parts[1], callback);
-      } else {
-        return this.getComponents(callback);
-      }
-    }
-
-    function request() {
-      path = parts.join('/');
-      return self.get('/' + path, callback);
-    }
-
-    return request();
+    return shell.request('get', path, callback);
   },
   'less': function(path, callback) {
     if (!callback) {
@@ -231,24 +177,7 @@ shell.builtin = {
       return callback(new Error('Argument required.'));
     }
 
-    path = resolve('/', shell.cwd, path);
-    path = path.replace(/^\.?\/+|\/+$/g, '');
-
-    var parts = path.split('/');
-    if (parts[0] === 'customers') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        var ref = parts.splice(1, 1)[0];
-        parts.push('lookup?reference=' + ref);
-        path = parts.join('/');
-      }
-    } else if (parts[0] === 'products') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        parts.splice(1, 0, 'handle');
-        path = parts.join('/');
-      }
-    }
-
-    return this.delete('/' + path, callback);
+    return shell.request('delete', path, callback);
   },
   'mv': function(options, path, callback) {
     if (!callback) {
@@ -256,32 +185,11 @@ shell.builtin = {
       path = null;
     }
 
-    if (!path) {
-      return callback(new Error('Argument required.'));
-    }
-
-    path = resolve('/', shell.cwd, path);
-    path = path.replace(/^\.?\/+|\/+$/g, '');
-
-    var parts = path.split('/');
-    if (parts[0] === 'customers') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        var ref = parts.splice(1, 1)[0];
-        parts.push('lookup?reference=' + ref);
-        path = parts.join('/');
-      }
-    } else if (parts[0] === 'products') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        parts.splice(1, 0, 'handle');
-        path = parts.join('/');
-      }
-    }
-
     if (!options || !path || !callback) {
       return callback(new Error('Argument required.'));
     }
 
-    return this.put('/' + path, options, callback);
+    return shell.request('put', path, options, callback);
   },
   'mk': function(path, options, callback) {
     if (!callback) {
@@ -290,15 +198,15 @@ shell.builtin = {
       path = null;
     }
 
-    path = path || 'subscriptions';
-    path = resolve('/', shell.cwd, path);
-    path = path.replace(/^\.?\/+|\/+$/g, '');
+    if (!path) {
+      path = 'subscriptions';
+    }
 
     if (!options || !path || !callback) {
       return callback(new Error('Argument required.'));
     }
 
-    return this.post('/' + path, options, callback);
+    return shell.request('post', path, options, callback);
   },
   'setopt': function(key, value, callback) {
     if (!key || !value || !callback) {
@@ -320,22 +228,22 @@ shell.builtin = {
       if (cmd === 'all') {
         Object.keys(shell.info).forEach(function(cmd) {
           shell.builtin.help(cmd, function() {});
-          console.error('');
+          error('');
         });
         return callback();
       }
       if (!shell.info[cmd]) {
-        console.error('No information for command: `' + cmd + '`.');
+        error('No information for command: `' + cmd + '`.');
         return callback();
       }
-      console.error(cmd);
-      console.error(shell.info[cmd]);
+      error(cmd);
+      error(shell.info[cmd]);
       return callback();
     }
 
     shell.help();
 
-    console.error('');
+    error('');
 
     var out = []
       , i = 0;
@@ -352,7 +260,7 @@ shell.builtin = {
       out.push(cmd);
     });
 
-    console.error(out.join(''));
+    error(out.join(''));
 
     return callback();
   },
@@ -373,6 +281,87 @@ shell.builtin = {
 Object.keys(shell.builtin).forEach(function(name) {
   charged.prototype[name] = shell.builtin[name];
 });
+
+/**
+ * Request
+ */
+
+shell.request = function(method, path, options, callback) {
+  var parts;
+
+  if (!callback) {
+    callback = options;
+    options = null;
+  }
+
+  path = resolve('/', shell.cwd, path);
+  path = path.replace(/^\.?\/+|\/+$/g, '');
+
+  parts = path.split('/');
+
+  if (parts[0] === 'customers') {
+    if (parts[1] && !/^\d+$/.test(parts[1])) {
+      if (parts[2]) {
+        // We need this because /customers/lookup/subscriptions?reference=foo
+        // doesn't work.
+        return shell.chargify.getCustomerByRef(parts[1], function(err, customer) {
+          if (err) return callback(err);
+          parts[1] = customer.id + '';
+          return request();
+        });
+      }
+      parts[1] = 'lookup?reference=' + parts[1];
+    }
+  } else if (parts[0] === 'products') {
+    if (parts[1] && !/^\d+$/.test(parts[1])) {
+      if (parts[2]) {
+        // NOTE: This may not be necessary.
+        return shell.chargify.getProductByHandle(parts[1], function(err, product) {
+          if (err) return callback(err);
+          parts[1] = product.id + '';
+          return request();
+        });
+      }
+      parts.splice(1, 0, 'handle');
+    }
+  } else if (parts[0] === 'product_families') {
+    if (parts[1] && !/^\d+$/.test(parts[1])) {
+      return shell.chargify.getFamilyByHandle(parts[1], function(err, family) {
+        if (err) return callback(err);
+        parts[1] = family.id + '';
+        return request();
+      });
+    }
+  } else if (parts[0] === 'coupons') {
+    if (parts[1] && !/^\d+$/.test(parts[1])) {
+      return shell.chargify.getCouponByCode(parts[1], function(err, coupon) {
+        if (err) return callback(err);
+        parts[1] = coupon.id + '';
+        return request();
+      });
+    }
+  } else if (parts[0] === 'components') {
+    // Add a components directory.
+    if (method === 'get') {
+      if (parts[1]) {
+        return !/^\d+$/.test(parts[1])
+          ? shell.chargify.getComponentByName(parts[1], callback)
+          : shell.chargify.getComponent(parts[1], callback);
+      } else {
+        return shell.chargify.getComponents(callback);
+      }
+    }
+  }
+
+  function request() {
+    path = '/' + parts.join('/');
+    return options
+      ? shell.chargify[method](path, callback)
+      : shell.chargify[method](path, options, callback);
+  }
+
+  return request();
+};
 
 /**
  * Execute Process
@@ -467,7 +456,7 @@ shell.exec = function(args, callback) {
   }
 
   if (!~shell.commands.indexOf(cmd)) {
-    console.error('No such command: `' + cmd + '`. Type `help` for commands.');
+    error('No such command: `' + cmd + '`. Type `help` for commands.');
     return callback();
   }
 
@@ -497,14 +486,14 @@ shell.exec = function(args, callback) {
     try {
       print(shell.chargify[cmd].apply(shell.chargify, args));
     } catch (e) {
-      console.error(e.message);
+      error(e.message);
     }
     return callback();
   }
 
   args.push(function(err, results) {
     if (err) {
-      console.error(err.message);
+      error(err.message);
       return callback();
     }
     if (results) print(results);
@@ -570,20 +559,19 @@ shell.complete = function(line, callback) {
         , path = parts[1].substring(start.length)
         , last;
 
-      if (shell.cwd !== '/' && start !== '/') return done();
-
-      while (i--) {
-        if (shell.toplevel[i].indexOf(path) === 0) {
-          if (path !== shell.toplevel[i]) {
-            out.push(cmd + ' ' + start + shell.toplevel[i]);
+      if (resolve('/', shell.cwd, start) === '/' && !~path.indexOf('/')) {
+        while (i--) {
+          if (shell.toplevel[i].indexOf(path) === 0) {
+            if (path !== shell.toplevel[i]) {
+              out.push(cmd + ' ' + start + shell.toplevel[i]);
+            }
           }
         }
-      }
-
-      if (!out.length) {
+      } else {
         path = path.split('/');
         last = path.pop();
         path = start + path.join('/');
+        if (path) path += '/';
 
         return shell.list(path, function(err, results) {
           if (err) return done();
@@ -591,7 +579,7 @@ shell.complete = function(line, callback) {
           i = results.length;
           while (i--) {
             if (results[i].indexOf(last) === 0) {
-              out.push(cmd + ' ' + path + '/' + results[i]);
+              out.push(cmd + ' ' + path + results[i] + '/');
             }
           }
 
@@ -613,14 +601,14 @@ shell.complete = function(line, callback) {
  */
 
 shell.help = function() {
-  console.error('Charged (https://github.com/chjj/charged)');
-  console.error('Copyright (c) 2012, Christopher Jeffrey (MIT License)');
-  console.error('Usage: $ charged [subdomain] [api-key]\n'
-              + '                 [--subdomain subdomain] [--key key]\n'
-              + '                 [--site-key key] [--family family]\n'
-              + '                 [--config conf] [--debug] [--raw]\n'
-              + '                 [--command cmd] [--help]\n'
-              + '                 [--opt.foo val] [cmd]');
+  error('Charged (https://github.com/chjj/charged)');
+  error('Copyright (c) 2012, Christopher Jeffrey (MIT License)');
+  error('Usage: $ charged [subdomain] [api-key]\n'
+      + '                 [--subdomain subdomain] [--key key]\n'
+      + '                 [--site-key key] [--family family]\n'
+      + '                 [--config conf] [--debug] [--raw]\n'
+      + '                 [--command cmd] [--help]\n'
+      + '                 [--opt.foo val] [cmd]');
 };
 
 /**
@@ -790,6 +778,11 @@ function print(obj) {
     return process.stdout.write(JSON.stringify(obj, null, 2) + '\n');
   }
   return process.stdout.write(inspect(obj) + '\n');
+}
+
+function error() {
+  if (!isatty(2)) return;
+  return console.error.apply(console, arguments);
 }
 
 function getStdin(callback) {
