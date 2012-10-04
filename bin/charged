@@ -144,7 +144,8 @@ shell.builtin = {
     return this.cat.apply(this, arguments);
   },
   'cat': function(path, callback) {
-    var self = this;
+    var self = this
+      , parts;
 
     if (!callback) {
       callback = path;
@@ -159,7 +160,8 @@ shell.builtin = {
       return callback(null, shell.toplevel.join('\n'));
     }
 
-    var parts = path.split('/');
+    parts = path.split('/');
+
     if (parts[0] === 'customers') {
       if (parts[1] && !/^\d+$/.test(parts[1])) {
         var ref = parts.splice(1, 1)[0];
@@ -168,13 +170,34 @@ shell.builtin = {
         }
         parts.push('lookup?reference=' + ref);
         path = parts.join('/');
+        //return this.getCustomerByRef(parts[1], function (err, customer) {
+        //  if (err) return callback(err);
+        //  parts[1] = customer.id + '';
+        //  return request();
+        //});
       }
     } else if (parts[0] === 'products') {
       if (parts[1] && !/^\d+$/.test(parts[1])) {
         parts.splice(1, 0, 'handle');
         path = parts.join('/');
+        //return this.getProductByHandle(parts[1], function (err, product) {
+        //  if (err) return callback(err);
+        //  parts[1] = product.id + '';
+        //  return request();
+        //});
       }
-    } else if (parts[0] === 'components') {
+    } else if (parts[0] === 'product_families') {
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        return this.getFamilyByHandle(parts[1], function (err, family) {
+          if (err) return callback(err);
+          parts[1] = family.id + '';
+          return request();
+        });
+      }
+    }
+
+    // Add a components directory.
+    if (parts[0] === 'components') {
       if (parts[1]) {
         return !/^\d+$/.test(parts[1])
           ? this.getComponentByName(parts[1], callback)
@@ -182,17 +205,14 @@ shell.builtin = {
       } else {
         return this.getComponents(callback);
       }
-    } else if (parts[0] === 'product_families') {
-      if (parts[1] && !/^\d+$/.test(parts[1])) {
-        return this.getFamilyByHandle(parts[1], function (err, family) {
-          if (err) return callback(err);
-          parts[1] = family.id + '';
-          return self.get('/' + parts.join('/'), callback);
-        });
-      }
     }
 
-    return this.get('/' + path, callback);
+    function request() {
+      path = parts.join('/');
+      return self.get('/' + path, callback);
+    }
+
+    return request();
   },
   'less': function(path, callback) {
     if (!callback) {
