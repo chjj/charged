@@ -144,6 +144,8 @@ shell.builtin = {
     return this.cat.apply(this, arguments);
   },
   'cat': function(path, callback) {
+    var self = this;
+
     if (!callback) {
       callback = path;
       path = null;
@@ -173,24 +175,20 @@ shell.builtin = {
         path = parts.join('/');
       }
     } else if (parts[0] === 'components') {
-      if (!parts[1]) {
-        return this.getComponents(callback);
+      if (parts[1]) {
+        return !/^\d+$/.test(parts[1])
+          ? this.getComponentByName(parts[1], callback)
+          : this.getComponent(parts[1], callback);
       } else {
-        return this.getComponent(parts[1], callback);
+        return this.getComponents(callback);
       }
     } else if (parts[0] === 'product_families') {
-      if (parts[2] === 'products') {
-        if (!/^\d+$/.test(parts[1])) {
-          return this.getFamilyProductsByHandle(parts[1], callback);
-        } else {
-          return this.getFamilyProducts(parts[1], callback);
-        }
-      } else if (parts[1]) {
-        if (!/^\d+$/.test(parts[1])) {
-          return this.getProductFamilyByHandle(parts[1], callback);
-        } else {
-          return this.getProductFamily(parts[1], callback);
-        }
+      if (parts[1] && !/^\d+$/.test(parts[1])) {
+        return this.getFamilyByHandle(parts[1], function (err, family) {
+          if (err) return callback(err);
+          parts[1] = family.id + '';
+          return self.get('/' + parts.join('/'), callback);
+        });
       }
     }
 
