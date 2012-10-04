@@ -340,6 +340,16 @@ shell.request = function(method, path, options, callback) {
         return request();
       });
     }
+  } else if (parts[0] === 'webhooks') {
+    if (method === 'get') {
+      if (parts[1]) {
+        if (/^\d+$/.test(parts[1]) && !parts[2]) {
+          return shell.chargify.getWebhook(parts[1], callback);
+        }
+      } else {
+        return shell.chargify.getWebhooks({ per_page: 200 }, callback);
+      }
+    }
   } else if (parts[0] === 'components') {
     // Add a components directory.
     if (method === 'get') {
