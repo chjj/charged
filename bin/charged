@@ -346,9 +346,10 @@ shell.request = function(method, path, options, callback) {
         if (/^\d+$/.test(parts[1]) && !parts[2]) {
           return shell.chargify.getWebhook(parts[1], callback);
         }
-      } else {
-        return shell.chargify.getWebhooks({ per_page: 200 }, callback);
       }
+      // } else {
+      //   return shell.chargify.getWebhooks({ per_page: 200 }, callback);
+      // }
     }
   } else if (parts[0] === 'components') {
     // Add a components directory.
@@ -383,7 +384,10 @@ shell.spawn = function(path, name, args, callback) {
 
     results = inspect(results);
 
-    var tmp = process.env.HOME + '/.charged-tmp~' + Date.now();
+    var tmp = process.env.HOME
+      + '/.charged-tmp~'
+      + Date.now();
+
     fs.writeFile(tmp, results, function(err) {
       if (err) return callback(err);
 
@@ -514,7 +518,7 @@ shell.exec = function(args, callback) {
 };
 
 /**
- * Completions
+ * Cache
  */
 
 shell.cache = {};
@@ -527,6 +531,10 @@ shell._collectGarbage = function() {
     shell.cache = {};
   }, 20 * 1000);
 };
+
+/**
+ * Completions
+ */
 
 shell.list = function(path, callback) {
   if (!callback) {
