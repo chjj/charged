@@ -165,54 +165,64 @@ shell.builtin = {
       callback = path;
       path = null;
     }
+
     return shell.spawn(path, 'less', ['-R'], callback);
   },
   'rm': function(path, callback) {
     if (!callback) {
-      callback = path;
-      path = null;
-    }
-
-    if (!path) {
       return callback(new Error('Argument required.'));
     }
 
     return shell.request('delete', path, callback);
   },
-  'mv': function(options, path, callback) {
+  'mv': function(path, options, callback) {
     if (!callback) {
-      callback = path;
-      path = null;
+      return callback(new Error('Argument required.'));
     }
 
-    if (!options || !path || !callback) {
-      return callback(new Error('Argument required.'));
+    if (typeof path === 'object') {
+      var opt = path;
+      path = options;
+      options = opt;
     }
 
     return shell.request('put', path, options, callback);
   },
   'mk': function(path, options, callback) {
     if (!callback) {
-      callback = options;
-      options = path;
-      path = null;
-    }
-
-    if (!path) {
-      path = 'subscriptions';
-    }
-
-    if (!options || !path || !callback) {
       return callback(new Error('Argument required.'));
     }
 
     return shell.request('post', path, options, callback);
   },
+  'echo': function() {
+    var args = Array.prototype.slice.call(arguments)
+      , callback = args.pop()
+      , options
+      , path
+      , op;
+
+    op = args[args.length-2];
+    if (op === '>' || op === '>>') {
+      path = args.pop();
+      args.pop();
+      options = args.pop();
+      return op === '>'
+        ? this.mk(path, options, callback)
+        : this.mv(path, options, callback);
+    }
+
+    print(args.join(' '));
+
+    return callback();
+  },
   'setopt': function(key, value, callback) {
     if (!key || !value || !callback) {
       return callback(new Error('Argument required.'));
     }
+
     shell.chargify[toCamel(key)] = value;
+
     return callback();
   },
   'getopt': function(key, callback) {
@@ -299,9 +309,18 @@ shell.request = function(method, path, options, callback) {
 
   parts = path.split('/');
 
+  if (options) {
+    var format = shell.resources.indexOf(parts[0].slice(0, -1));
+    if (~format || parts[0] === 'product_families') {
+      format = format !== -1
+        ? shell.resources[format]
+        : 'product_family';
+    }
+  }
+
   if (parts[0] === 'customers') {
     if (parts[1] && !/^\d+$/.test(parts[1])) {
-      if (parts[2]) {
+      if (method !== 'get' || parts[2]) {
         // We need this because /customers/lookup/subscriptions?reference=foo
         // doesn't work.
         return shell.chargify.getCustomerByRef(parts[1], function(err, customer) {
@@ -366,9 +385,12 @@ shell.request = function(method, path, options, callback) {
 
   function request() {
     path = '/' + parts.join('/');
+    if (shell.options.debug2) {
+      print([method, path, options, callback, format]);
+    }
     return options
-      ? shell.chargify[method](path, callback)
-      : shell.chargify[method](path, options, callback);
+      ? shell.chargify[method](path, callback, format)
+      : shell.chargify[method](path, options, callback, format);
   }
 
   return request();
@@ -898,6 +920,9 @@ function parseArg() {
         break;
       case '--debug':
         opt.debug = true;
+        break;
+      case '--debug2':
+        opt.debug2 = true;
         break;
       case '-h':
       case '--help':
