@@ -2,7 +2,7 @@
   "name": "charged",
   "description": "Binding to the Chargify API",
   "author": "Christopher Jeffrey",
-  "version": "0.1.9",
+  "version": "0.2.0",
   "main": "./index.js",
   "bin": "./bin/charged",
   "man": "./man/charged.1",
