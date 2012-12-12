@@ -57,25 +57,6 @@ shell.reduced = [
   'name'
 ];
 
-shell.resources = [
-  'customer',
-  'subscription',
-  'statement',
-  'statement_ids',
-  'migration',
-  'adjustment',
-  'component',
-  'usage',
-  'credit',
-  'refund',
-  'coupon',
-  'transaction',
-  'product',
-  'product_family',
-  'webhook',
-  'errors'
-];
-
 shell.builtin = {
   'cd': function(path, callback) {
     shell.cwd = resolve('/', shell.cwd, path);
@@ -310,10 +291,10 @@ shell.request = function(method, path, options, callback) {
   parts = path.split('/');
 
   if (options) {
-    var format = shell.resources.indexOf(parts[0].slice(0, -1));
+    var format = charged.resources.indexOf(parts[0].slice(0, -1));
     if (~format || parts[0] === 'product_families') {
       format = format !== -1
-        ? shell.resources[format]
+        ? charged.resources[format]
         : 'product_family';
     }
   }
