@@ -394,6 +394,8 @@ shell.spawn = function(path, name, args, callback) {
     fs.writeFile(tmp, results, function(err) {
       if (err) return callback(err);
 
+      process.stdin.pause();
+
       var ps = spawn(name, args.concat(tmp), {
         cwd: process.cwd(),
         env: process.env,
@@ -402,6 +404,7 @@ shell.spawn = function(path, name, args, callback) {
       });
 
       ps.on('exit', function() {
+        process.stdin.resume();
         fs.unlink(tmp, function() {
           return callback();
         });
